@@ -1,0 +1,37 @@
+{
+  "type": "module",
+  "name": "codemerger",
+  "version": "1.0.0",
+  "description": "Code merging tool for LLM",
+  "main": "index.js",
+  "bin": {
+    "codemerger": "index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "keywords": [
+    "code",
+    "merge",
+    "tool"
+  ],
+  "author": {
+    "name": "Kim seungtae",
+    "email": "monogatree@gmail.com",
+    "url": "https://www.youtube.com/@%EC%BD%94%EB%93%9C%EA%B9%8E%EB%8A%94%EB%85%B8%EC%9D%B8"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "chardet": "^2.0.0",
+    "clipboardy": "^4.0.0",
+    "commander": "^13.1.0",
+    "ignore": "^7.0.3",
+    "isbinaryfile": "^5.0.4"
+  },
+  "files": [
+    "index.js",
+    "templates/"
+  ]
+}

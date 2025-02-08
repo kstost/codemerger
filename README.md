@@ -14,7 +14,11 @@ A CLI tool that merges source code files into a single markdown document, perfec
 ## Installation
 
 ```bash
+# For Windows
 npm install -g codemerger
+
+# For macOS (requires sudo for global installation)
+sudo npm install -g codemerger
 ```
 
 ## Usage

@@ -12,6 +12,8 @@ This tool is particularly useful when working with next-generation models like o
 - Merges multiple files into a single markdown document with proper code fencing
 - Automatically copies to clipboard or saves to file
 - Supports `.gitignore`-style pattern matching for excluding files
+- **NEW**: Inline ignore patterns (`-l`) for quick, one-off excludes
+- **NEW**: Allow list option (`-a`) to include only specific files/folders
 - Smart detection of binary and non-text files
 - Intelligent code fence selection to handle files containing backticks
 - UTF-8 and common encoding support
@@ -92,8 +94,34 @@ codemerger src out.md -v
 - `-v`: Enable verbose logging
 - **Use case:** Debug or monitor the merging process
 
+### 6. Inline Ignore Patterns (NEW)
+```bash
+# Provide inline ignore patterns and copy output to clipboard
+codemerger src -c -l node_modules/ *.md .git
+```
+**Explanation:**
+- `codemerger`: The main command
+- `src`: Source directory
+- `-c`: Copy merged output to clipboard
+- `-l node_modules/ *.md .git`: Space-separated inline ignore patterns
+- **Use case:** Quickly exclude specified files/folders without an ignore file
+
+### 7. Allow List Option (NEW)
+```bash
+# Include only certain files, ignoring everything else
+codemerger src -c -a saveData.js data.txt
+```
+**Explanation:**
+- `codemerger`: The main command
+- `src`: Source directory
+- `-c`: Copy merged output to clipboard
+- `-a saveData.js data.txt`: Only include these exact paths; everything else is excluded
+- **Use case:** Whitelist approach for merging a small subset of files
+
 ## Options
 - `-i, --ignore <file>`: Specify ignore pattern file (like .gitignore)
+- `-l, --inline-ignore <patterns...>`: Provide space-separated ignore patterns inline  
+- `-a, --allow <patterns...>`: Only include these exact paths; exclude everything else
 - `-v, --verbose`: Show detailed processing logs
 - `-c, --clipboard`: Force clipboard output (ignores output file argument)
 - `--version`: Show version number
@@ -115,6 +143,8 @@ codemerger src out.md -v
 - `-c`: Clipboard output
 - `-v`: Verbose logging
 - `-i <file>`: Ignore pattern file
+- `-l <patterns...>`: Inline ignore patterns
+- `-a <patterns...>`: Allow list (only include these paths)
 
 ## Ignore Patterns
 Create a default ignore pattern file:
@@ -200,6 +230,16 @@ codemerger src/components docs/components.md -v -i .mergeignore
 - Enables verbose logging
 - Uses .mergeignore patterns
 - Ideal for subsection documentation
+
+### Combining Inline Ignore and Allow
+```bash
+codemerger src -v -l *.md -a index.js
+```
+**Explanation:**
+- Ignores all `.md` files via `-l` (inline-ignore)
+- Whitelists only `index.js` with `-a`
+- Verbose logs are enabled
+- Result: Only `index.js` remains in the final output
 
 ## Requirements
 - Node.js v14 or later

@@ -2,13 +2,17 @@
 
 /**
  * codemerger.js
- * Node.js용 CLI 스크립트
+ * Node.js CLI script
  *
  * Usage:
- *   codemerger <folder> <output> [옵션들]
+ *   codemerger <folder> <output> [options]
  *
- *   -i, --ignore  무시 패턴 파일(.gitignore 등)
- *   -v, --verbose 추가 로그 출력
+ * Options:
+ *   -i, --ignore <file>         Ignore pattern file (.gitignore, etc.)
+ *   -l, --inline-ignore         Space-separated ignore patterns (skip matched)
+ *   -a, --allow                 Space-separated allow patterns (include only matched)
+ *   -v, --verbose               Show extra logs
+ *   -c, --clipboard             Copy result to clipboard (ignores output arg)
  */
 
 import fs from 'fs';
@@ -18,12 +22,10 @@ import chalk from 'chalk';
 import ignore from 'ignore';
 import clipboard from 'clipboardy';
 import chardet from 'chardet';
-import { isBinaryFileSync } from 'isbinaryfile'; // isbinaryfile 추가
-
-const program = new Command();
+import { isBinaryFileSync } from 'isbinaryfile';
 
 /**
- * .gitignore 등 무시 패턴을 읽어서 ignore 라이브러리 인스턴스를 생성.
+ * Load ignore patterns from a file (e.g., .gitignore).
  */
 function loadIgnorePatterns(ignoreFile) {
     const lines = [];
@@ -44,62 +46,46 @@ function loadIgnorePatterns(ignoreFile) {
 }
 
 /**
- * content 내부에 있는 연속된 backtick의 최대 길이를 찾고,
- * 그보다 1개 많은 backtick으로 fenced code block을 결정한다.
+ * Determine the fenced code block delimiter based on backticks in the file.
  */
 function chooseFence(content) {
     if (!content) return '```';
-    
+
     const matches = content.match(/`+/g);
     if (!matches) return '```';
-    
+
     try {
-        const maxCount = Math.max(...matches.map(m => m.length));
+        const maxCount = Math.max(...matches.map((m) => m.length));
         return '`'.repeat(Math.max(3, maxCount + 1));
-    } catch (err) {
-        // 예외 발생시 기본값 반환
+    } catch {
         return '```';
     }
 }
 
 /**
- * 파일이 "텍스트 파일"인지 판별.
- * 1) isbinaryfile 이용해서 바이너리 검사
- * 2) chardet 이용해서 알려진 텍스트 인코딩 여부 확인
+ * Check if a file is a text file by:
+ *  - using isbinaryfile to detect binary
+ *  - using chardet to detect known text encodings
  */
 function isTextFile(filePath) {
     try {
-        // --- 1) isbinaryfile 검사 ---
-        // isBinaryFileSync(filePath, [optional size]) 인자로 부분만 읽을 수도 있지만, 여기선 생략
+        // 1) Quick check with isbinaryfile
         if (isBinaryFileSync(filePath)) {
-            // 바이너리로 판정되면 즉시 false
             return false;
         }
-
-        // --- 2) chardet으로 추가 확인 ---
+        // 2) Additional check with chardet
         const buffer = fs.readFileSync(filePath);
-        const detected = chardet.detect(buffer);  // 예: 'UTF-8', 'ASCII', 'ISO-8859-1', 'Shift_JIS' 등
+        const detected = chardet.detect(buffer);
+        if (!detected) return false;
 
-        if (!detected) {
-            // 인코딩 추론 실패 -> 바이너리로 취급
-            return false;
-        }
-
-        // 소문자로 변환해서 간단히 확인
         const enc = detected.toLowerCase();
-
-        // 여기서는 utf, ascii, iso-8859, windows-125 계열 등을 텍스트로 가정
-        // euc-kr, shift_jis 등을 허용하고 싶다면 조건에 추가
-        if (
+        // We'll treat utf, ascii, iso-8859, windows-125 as text
+        return (
             enc.includes('utf') ||
             enc.includes('ascii') ||
             enc.includes('iso-8859') ||
             enc.includes('windows-125')
-        ) {
-            return true;
-        }
-
-        return false;
+        );
     } catch (err) {
         console.error(chalk.red(`Error reading file (${filePath}): ${err.message}`));
         return false;
@@ -107,39 +93,78 @@ function isTextFile(filePath) {
 }
 
 /**
- * baseFolder를 재귀 탐색하며, ignoreSpec으로부터 무시되지 않는 파일들을
- * 모아서 클립보드나 파일로 저장한다.
+ * Git-Ignore 스타일 패턴을 적용한 매칭:
+ *  - 디렉터리면 relPath + '/'
+ *  - 파일이면 relPath
+ * ex) pattern이 "index.js" 라면 "foo/bar/index.js" 도 매칭됨
  */
-function mergeCodes(baseFolder, resultFile, ignoreSpec, verbose = false, useClipboard = false) {
+function isMatched(ig, relPath, isDir) {
+    if (isDir) {
+        return ig.ignores(relPath + '/');
+    }
+    return ig.ignores(relPath);
+}
+
+/**
+ * mergeCodes
+ *  - allowIg가 있으면: "매칭된" 파일만 최종 포함
+ *  - allowIg가 없으면: "매칭된" 파일(패턴과 일치하는 것)을 제외
+ * 
+ * 주의: Allow 모드에서도 디렉터리가 매칭되지 않더라도, 자식 파일이 매칭될 수 있으므로
+ *       무조건 디렉터리는 재귀 탐색한다.
+ */
+function mergeCodes(baseFolder, resultFile, ignoreSpec, options) {
+    const { verbose, useClipboard, allowIg } = options;
     const mergedItems = [];
 
-    /**
-     * 재귀적으로 파일/디렉토리 순회
-     */
     function walk(dir) {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
+
         for (const entry of entries) {
             const absPath = path.join(dir, entry.name);
-            // relPath는 baseFolder 기준 상대 경로 (슬래시 통일)
             const relPath = path.relative(baseFolder, absPath).split(path.sep).join('/');
 
             if (entry.isDirectory()) {
-                // 디렉토리 패턴 무시 여부 (디렉토리 끝에 '/' 붙여서 확인)
-                if (!ignoreSpec.ignores(relPath + '/')) {
-                    walk(absPath);
-                } else if (verbose) {
-                    console.log(chalk.yellow(`[IGNORE] Directory: ${relPath}/`));
-                }
+                // Allow 모드라도 디렉터리 자체가 매칭 안 되어도, 혹시 자식 중 매칭될 파일이 있을 수 있으므로
+                // 무조건 들어가서 탐색
+                walk(absPath);
             } else if (entry.isFile()) {
-                if (!ignoreSpec.ignores(relPath)) {
-                    // 텍스트 파일인지 여부 검사
-                    if (isTextFile(absPath)) {
-                        mergedItems.push([`./${relPath}`, absPath]);
-                    } else if (verbose) {
-                        console.log(chalk.yellow(`[SKIP] Binary (or non-text) file: ${relPath}`));
+                if (allowIg) {
+                    // ALLOW 모드: 패턴과 매칭되어야 포함
+                    if (isMatched(allowIg, relPath, false)) {
+                        if (verbose) {
+                            console.log(chalk.green(`[ALLOW] ${relPath}`));
+                        }
+                        // 텍스트 파일인지 확인 후 push
+                        if (isTextFile(absPath)) {
+                            mergedItems.push([`./${relPath}`, absPath]);
+                        } else if (verbose) {
+                            if (false) console.log(chalk.yellow(`[SKIP] Binary (or non-text) file: ${relPath}`));
+                        }
+                    } else {
+                        if (verbose) {
+                            if (false) console.log(chalk.yellow(`[SKIP not allowed] ${relPath}`));
+                        }
                     }
-                } else if (verbose) {
-                    console.log(chalk.yellow(`[IGNORE] File: ${relPath}`));
+                } else {
+                    // IGNORE 모드: 패턴과 매칭되면 제외
+                    if (isMatched(ignoreSpec, relPath, false)) {
+                        if (verbose) {
+                            if (false) console.log(chalk.yellow(`[IGNORE] File:  ${relPath}`));
+                        }
+                    } else {
+                        // 매칭 안 된 파일은 포함
+                        if (isTextFile(absPath)) {
+                            mergedItems.push([`./${relPath}`, absPath]);
+                            if (verbose) {
+                                console.log(chalk.green(`[ALLOW] ${relPath}`));
+                            }
+
+                        } else if (verbose) {
+                            if (false) console.log(chalk.yellow(`[SKIP] Binary (or non-text) file: ${relPath}`));
+                        }
+
+                    }
                 }
             }
         }
@@ -147,21 +172,18 @@ function mergeCodes(baseFolder, resultFile, ignoreSpec, verbose = false, useClip
 
     walk(baseFolder);
 
-    // 경로 기준 정렬
+    // 정렬
     mergedItems.sort((a, b) => a[0].localeCompare(b[0]));
 
+    // Markdown 결과 생성
     let output = '';
     for (const [displayPath, absPath] of mergedItems) {
         output += `${displayPath}:\n`;
-        let content = '';
         try {
-            content = fs.readFileSync(absPath, 'utf8');
+            const content = fs.readFileSync(absPath, 'utf8');
             const fence = chooseFence(content);
             output += fence + '\n';
-            output += content;
-            if (!content.endsWith('\n')) {
-                output += '\n';
-            }
+            output += content.endsWith('\n') ? content : `${content}\n`;
             output += fence + '\n\n';
         } catch (err) {
             console.error(chalk.red(`Error processing file (${absPath}): ${err.message}`));
@@ -171,6 +193,7 @@ function mergeCodes(baseFolder, resultFile, ignoreSpec, verbose = false, useClip
         }
     }
 
+    // 클립보드 or 파일 출력
     if (useClipboard) {
         try {
             clipboard.writeSync(output);
@@ -187,7 +210,7 @@ function mergeCodes(baseFolder, resultFile, ignoreSpec, verbose = false, useClip
 }
 
 /**
- * 기본 ignore 패턴 샘플 생성
+ * Create a sample ignore file.
  */
 function createSampleIgnore(filePath) {
     try {
@@ -200,78 +223,103 @@ function createSampleIgnore(filePath) {
     }
 }
 
-/**
- * CLI 정의
- */
+/** Commander CLI setup */
+const program = new Command();
+
 program
     .name('codemerger')
     .description(`A tool to merge directory files into a single Markdown document
 
 Examples:
-  $ codemerger .                         # Copy current directory files to clipboard
-  $ codemerger src output.md             # Save src directory files to output.md
-  $ codemerger . -c                      # Explicitly copy to clipboard
-  $ codemerger . result.md -i .gitignore # Apply gitignore patterns while merging
-  $ codemerger src out.md -v             # Merge with verbose logging
-
-Output Format:
-  - Each file is shown with its relative path
-  - Code is formatted in markdown code blocks
-  - Binary or non-text files are skipped
-  - Files matching ignore patterns are excluded`)
+  $ codemerger .                          
+  $ codemerger src output.md              
+  $ codemerger . -c                       
+  $ codemerger . result.md -i .gitignore  
+  $ codemerger src out.md -v              
+  $ codemerger src -c -a node_modules     
+`)
     .argument('<folder>', 'Source folder path to merge')
     .argument('[output]', 'Output file path (defaults to clipboard)')
     .option('-i, --ignore <file>', 'Ignore pattern file (like .gitignore)')
+    .option('-l, --inline-ignore <patterns...>', 'Space-separated ignore patterns (skip matched)')
+    .option('-a, --allow <patterns...>', 'Space-separated allow patterns (include only matched)')
     .option('-v, --verbose', 'Show detailed processing logs', false)
     .option('-c, --clipboard', 'Copy output to clipboard (ignores output arg)', false)
     .version('1.0.0');
 
-// init 명령어 추가
+/**
+ * 'init' subcommand
+ */
 program
     .command('init')
-    .description(`Create a default ignore pattern file
-
-Examples:
-  $ codemerger init                    # Create .mergeignore file
-  $ codemerger init custom-ignore.txt  # Create with custom name
-
-Included Pattern Rules:
-  - System files (.DS_Store, Thumbs.db)
-  - Node modules and logs
-  - IDE settings
-  - Build outputs
-  - Environment files
-  - Temporary files
-  - Binary and media files
-  - Other common excludes`)
+    .description(`Create a default ignore pattern file`)
     .argument('[filename]', 'Ignore file name (default: .mergeignore)', '.mergeignore')
     .action((filename) => {
         const filePath = path.resolve(filename);
         createSampleIgnore(filePath);
     });
 
-// 메인 명령어 action 추가
+/**
+ * Main action
+ */
 program.action((folder, output, options) => {
     const folderPath = path.resolve(folder);
     const useClipboard = options.clipboard || !output;
     const resultPath = output ? path.resolve(output) : 'clipboard';
 
-    // ignore 패턴 불러오기
+    // 일반 ignore 인스턴스
     let ig = ignore();
-    if (options.ignore) {
-        ig = loadIgnorePatterns(path.resolve(options.ignore));
+    // allowIg 인스턴스
+    let allowIg = null;
+
+    // --allow가 있으면 allow 모드
+    if (options.allow && options.allow.length > 0) {
+        allowIg = ignore().add(options.allow);
+
+        // 만약 -i 또는 -l이 함께 들어온 경우 경고
+        if (options.ignore || (options.inlineIgnore && options.inlineIgnore.length > 0)) {
+            console.log(
+                chalk.yellow(
+                    '[WARNING] -a(allow)와 -i / -l(ignore)은 동시에 사용할 수 없습니다. ' +
+                    'allow가 우선 적용되고, ignore 패턴은 무시됩니다.'
+                )
+            );
+        }
+    }
+    // allow가 아닌 경우에만 ignore 로직
+    else {
+        if (options.ignore) {
+            ig = loadIgnorePatterns(path.resolve(options.ignore));
+        }
+        if (options.inlineIgnore && options.inlineIgnore.length > 0) {
+            ig.add(options.inlineIgnore);
+        }
     }
 
+    // Verbose
     if (options.verbose) {
         console.log(chalk.green(`Target folder: ${folderPath}`));
         console.log(chalk.green(`Output target: ${useClipboard ? 'clipboard' : resultPath}`));
-        if (options.ignore) {
-            console.log(chalk.green(`Ignore pattern file: ${options.ignore}`));
+
+        if (allowIg) {
+            console.log(chalk.green(`Allow patterns: ${options.allow.join(', ')}`));
+        } else {
+            if (options.ignore) {
+                console.log(chalk.green(`Ignore pattern file: ${options.ignore}`));
+            }
+            if (options.inlineIgnore && options.inlineIgnore.length > 0) {
+                console.log(chalk.green(`Inline ignore patterns: ${options.inlineIgnore.join(', ')}`));
+            }
         }
         console.log('');
     }
 
-    mergeCodes(folderPath, resultPath, ig, options.verbose, useClipboard);
+    // 병합
+    mergeCodes(folderPath, resultPath, ig, {
+        verbose: options.verbose,
+        useClipboard,
+        allowIg
+    });
 });
 
 program.parse(process.argv);

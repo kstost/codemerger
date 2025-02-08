@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "codemerger",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Code merging tool for LLM",
   "main": "index.js",
   "bin": {

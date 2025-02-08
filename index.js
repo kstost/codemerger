@@ -245,7 +245,7 @@ Examples:
     .option('-a, --allow <patterns...>', 'Space-separated allow patterns (include only matched)')
     .option('-v, --verbose', 'Show detailed processing logs', false)
     .option('-c, --clipboard', 'Copy output to clipboard (ignores output arg)', false)
-    .version('1.0.0');
+    .version('1.0.2');
 
 /**
  * 'init' subcommand

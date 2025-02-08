@@ -1,6 +1,13 @@
 # CodeMerger
 A CLI tool that merges source code files into a single markdown document, perfect for sharing code with LLMs.
 
+## Introduction
+When coding with AI assistance, the most crucial aspect is ensuring that the AI accurately understands the entire codebase of your project. While dedicated programs like Cursor AI handle this automatically, using chatbot-style AIs like ChatGPT or Claude presents a challenge - you need to manually copy and paste all the code, and it's often difficult to determine which code needs to be shared.
+
+CodeMerger, developed by CodeGrindingOldman, is a program designed to address these inconveniences. It automatically consolidates code spread across multiple files, either copying it to your clipboard or saving it to a file, making it easier to work with AI chatbots for coding tasks.
+
+This tool is particularly useful when working with next-generation models like o1 and o3-mini-high on the ChatGPT platform rather than Cursor, providing a streamlined way to share your code.
+
 ## Features
 - Merges multiple files into a single markdown document with proper code fencing
 - Automatically copies to clipboard or saves to file
